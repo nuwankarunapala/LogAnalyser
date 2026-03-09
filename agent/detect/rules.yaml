@@ -1,0 +1,28 @@
+rules:
+  - id: OOM_MAIN_001
+    category: oom
+    severity: high
+    target_container_role: main
+    match:
+      contains_any: ["OOMKilled", "MemoryPressure", "Evicted"]
+    evidence_required:
+      - pod_status
+      - k8s_events
+    rca_hint: "Main container memory limit too low or sudden workload spike"
+    recommended_actions:
+      - "Check memory requests/limits"
+      - "Review recent traffic spikes"
+
+  - id: IAM_AUTH_001
+    category: authentication
+    severity: high
+    target_container_role: main
+    match:
+      contains_any: ["keycloak", "token", "realm", "openid"]
+    evidence_required:
+      - iam_logs
+      - readiness_events
+    rca_hint: "IAM/Keycloak authentication path degraded"
+    recommended_actions:
+      - "Validate IAM provider health"
+      - "Check realm/client configuration"
