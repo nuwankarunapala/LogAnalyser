@@ -14,3 +14,17 @@ This repository contains the initial file structure for **Option A** Python-base
 python -m compileall agent
 python agent/main.py
 ```
+
+## Run full local analysis
+1. Copy exported logs into `input_logs/` (`.log`, `.txt`, `.jsonl`).
+2. Run:
+
+```bash
+python agent/main.py --log-dir input_logs --output-dir output
+```
+
+3. Open generated report:
+
+```bash
+cat output/rca_report.md
+```
