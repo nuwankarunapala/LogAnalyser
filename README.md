@@ -12,7 +12,7 @@ This repository contains the initial file structure for **Option A** Python-base
 ## Quick check
 ```bash
 python -m compileall agent
-python agent/main.py
+python -m agent.main
 ```
 
 ## Run full local analysis
