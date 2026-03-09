@@ -1,0 +1,17 @@
+# RCA Report
+
+## Incident Summary
+{{ summary }}
+
+## Timeline
+{% for item in timeline %}
+- {{ item.timestamp }} | {{ item.source }} | {{ item.message }}
+{% endfor %}
+
+## Probable Root Cause
+{{ root_cause }}
+
+## Recommended Actions
+{% for action in actions %}
+- {{ action }}
+{% endfor %}
