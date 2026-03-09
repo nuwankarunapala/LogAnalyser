@@ -9,10 +9,8 @@ from typing import Any, Dict, List
 
 import yaml
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
 if __package__ in {None, ""}:
-    sys.path.insert(0, str(PROJECT_ROOT))
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.collector.local_logs import read_log_events
 from agent.correlate.root_cause_ranker import rank_root_causes
@@ -68,25 +66,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--log-dir",
         type=Path,
-        default=PROJECT_ROOT / "input_logs",
+        default=Path("input_logs"),
         help="Directory containing exported middleware logs (.log/.txt/.jsonl).",
     )
     parser.add_argument(
         "--rules-file",
         type=Path,
-        default=PROJECT_ROOT / "agent/detect/rules.yaml",
+        default=Path("agent/detect/rules.yaml"),
         help="YAML rule catalog file.",
     )
     parser.add_argument(
         "--template-file",
         type=Path,
-        default=PROJECT_ROOT / "agent/report/rca_template.md.j2",
+        default=Path("agent/report/rca_template.md.j2"),
         help="Jinja2 markdown template path.",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=PROJECT_ROOT / "output",
+        default=Path("output"),
         help="Directory where generated report is written.",
     )
     return parser.parse_args()
@@ -97,10 +95,6 @@ def main() -> None:
 
     if not args.log_dir.exists():
         raise SystemExit(f"Log directory not found: {args.log_dir}")
-    if not args.rules_file.exists():
-        raise SystemExit(f"Rules file not found: {args.rules_file}")
-    if not args.template_file.exists():
-        raise SystemExit(f"Template file not found: {args.template_file}")
 
     events = read_log_events(args.log_dir)
     rules = _load_rules(args.rules_file)
