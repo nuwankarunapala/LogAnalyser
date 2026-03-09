@@ -28,3 +28,36 @@ python agent/main.py --log-dir input_logs --output-dir output
 ```bash
 cat output/rca_report.md
 ```
+
+## Run full local analysis
+1. Install dependencies once:
+
+```bash
+pip install -r requirements.txt
+```
+
+2. Copy exported logs into `input_logs/` (`.log`, `.txt`, `.jsonl`).
+
+3. Run the agent:
+
+```bash
+python -m agent.main
+```
+
+4. Open generated report:
+
+```bash
+cat output/rca_report.md
+```
+
+### Windows PowerShell equivalents
+```powershell
+python -m agent.main
+Get-Content .\output\rca_report.md
+```
+
+### Troubleshooting
+- If no report appears, first check the command output for the `Report written :` absolute path and open that exact file.
+- If the command fails with `ModuleNotFoundError`/`ImportError`, run `pip install -r requirements.txt` and re-run.
+
+- If report timeline is gibberish (`ï¿½` characters), your `.log` may be compressed/binary; export plain text logs or decompress first.
