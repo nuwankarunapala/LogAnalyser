@@ -20,6 +20,9 @@ from agent.detect.rule_engine import apply_rules
 from agent.report.render import render_markdown
 
 
+MAX_REPORT_LOG_MESSAGE_LENGTH = 280
+
+
 def _load_rules(rules_file: Path) -> List[Dict[str, Any]]:
     payload = yaml.safe_load(rules_file.read_text(encoding="utf-8")) or {}
     rules = payload.get("rules", [])
@@ -36,6 +39,8 @@ def _build_context(
     ranked = rank_root_causes(signals)
     top_signal = ranked[0] if ranked else None
 
+    unresolved_rca = False
+
     if top_signal:
         root_cause = top_signal.get("rca_hint", "Unknown")
         actions = top_signal.get("recommended_actions", [])
@@ -44,28 +49,58 @@ def _build_context(
             f"Top candidate: {top_signal.get('rule_id')} ({top_signal.get('severity')})."
         )
     else:
+        unresolved_rca = True
         root_cause = "No known issue detected from current rule catalog"
-        actions = ["Review raw logs and extend rules.yaml for your incident signatures."]
+        actions = [
+            "Review raw logs and extend rules.yaml for your incident signatures.",
+            "Collect additional Kubernetes context and rerun analysis.",
+        ]
         summary = f"No rules matched. Parsed {len(events)} log event(s)."
 
     if ai_hint:
         if ai_hint.get("root_cause"):
             root_cause = ai_hint["root_cause"]
+            unresolved_rca = False
         if ai_hint.get("executive_summary"):
             summary = ai_hint["executive_summary"]
         ai_actions = ai_hint.get("corrective_actions_planned", [])
         if ai_actions:
             actions = ai_actions
 
+    if unresolved_rca:
+        summary = (
+            f"{summary} Root cause is still inconclusive with the current evidence. "
+            "Please provide additional incident context and Kubernetes diagnostics."
+        )
+        actions.extend(
+            [
+                "Share recent deployment/configuration changes and exact user-facing symptoms.",
+                "Run `kubectl get pods -A -o wide` and `kubectl describe pod <pod> -n <namespace>` for impacted workloads.",
+                "Run `kubectl get events -A --sort-by=.metadata.creationTimestamp | tail -n 200` to capture recent cluster events.",
+                "Run `kubectl logs <pod> -n <namespace> --previous --tail=200` for restarting containers.",
+            ]
+        )
+
+    def _trim_message(record: Dict[str, Any]) -> Dict[str, Any]:
+        msg = str(record.get("message", ""))
+        if len(msg) > MAX_REPORT_LOG_MESSAGE_LENGTH:
+            msg = f"{msg[:MAX_REPORT_LOG_MESSAGE_LENGTH]}... [truncated]"
+        updated = dict(record)
+        updated["message"] = msg
+        return updated
+
     timeline_records = build_timeline(events)
-    timeline = [
-        {
-            "timestamp": item.get("timestamp", "N/A"),
-            "source": Path(item.get("source_file", "unknown")).name,
-            "message": item.get("message", ""),
-        }
-        for item in timeline_records[:100]
-    ]
+    timeline = []
+    for item in timeline_records[:100]:
+        timeline.append(
+            _trim_message(
+                {
+                    "timestamp": item.get("timestamp", "N/A"),
+                    "source": Path(item.get("source_file", "unknown")).name,
+                    "message": item.get("message", ""),
+                }
+            )
+        )
 
     impacted_sources = sorted(
         {
