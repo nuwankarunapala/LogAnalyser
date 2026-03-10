@@ -1,0 +1,7 @@
+files:
+  kubectl-describe.txt:
+    display_name: kubectl describe
+    container_role: main
+  pod-logs.txt:
+    display_name: pod logs
+    container_role: main
