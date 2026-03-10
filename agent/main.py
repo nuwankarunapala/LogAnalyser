@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -13,6 +13,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.collector.local_logs import read_log_events
+from agent.correlate.chatgpt_rca import infer_root_cause_with_chatgpt
 from agent.correlate.root_cause_ranker import rank_root_causes
 from agent.correlate.timeline import build_timeline
 from agent.detect.rule_engine import apply_rules
@@ -27,7 +28,11 @@ def _load_rules(rules_file: Path) -> List[Dict[str, Any]]:
     return rules
 
 
-def _build_context(events: List[Dict[str, Any]], signals: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _build_context(
+    events: List[Dict[str, Any]],
+    signals: List[Dict[str, Any]],
+    ai_hint: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     ranked = rank_root_causes(signals)
     top_signal = ranked[0] if ranked else None
 
@@ -42,6 +47,15 @@ def _build_context(events: List[Dict[str, Any]], signals: List[Dict[str, Any]]) 
         root_cause = "No known issue detected from current rule catalog"
         actions = ["Review raw logs and extend rules.yaml for your incident signatures."]
         summary = f"No rules matched. Parsed {len(events)} log event(s)."
+
+    if ai_hint:
+        if ai_hint.get("root_cause"):
+            root_cause = ai_hint["root_cause"]
+        if ai_hint.get("executive_summary"):
+            summary = ai_hint["executive_summary"]
+        ai_actions = ai_hint.get("corrective_actions_planned", [])
+        if ai_actions:
+            actions = ai_actions
 
     timeline_records = build_timeline(events)
     timeline = [
@@ -163,6 +177,16 @@ def parse_args() -> argparse.Namespace:
         default=Path("output"),
         help="Directory where generated report is written.",
     )
+    parser.add_argument(
+        "--use-chatgpt",
+        action="store_true",
+        help="Enable optional ChatGPT-assisted RCA enrichment (requires OPENAI_API_KEY).",
+    )
+    parser.add_argument(
+        "--chatgpt-model",
+        default="gpt-4.1-mini",
+        help="Model used for ChatGPT-assisted RCA when --use-chatgpt is enabled.",
+    )
     return parser.parse_args()
 
 
@@ -176,7 +200,11 @@ def main() -> None:
     rules = _load_rules(args.rules_file)
     signals = apply_rules(events, rules)
 
-    context = _build_context(events, signals)
+    ai_hint = None
+    if args.use_chatgpt:
+        ai_hint = infer_root_cause_with_chatgpt(events, signals, model=args.chatgpt_model)
+
+    context = _build_context(events, signals, ai_hint=ai_hint)
     report = render_markdown(context, args.template_file)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -185,6 +213,8 @@ def main() -> None:
 
     print(f"Parsed events : {len(events)}")
     print(f"Matched signals: {len(signals)}")
+    if args.use_chatgpt:
+        print(f"ChatGPT hint  : {'used' if ai_hint else 'not available'}")
     print(f"Report written : {report_path.resolve()}")
 
 
