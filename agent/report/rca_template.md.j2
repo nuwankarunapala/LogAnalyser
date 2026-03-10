@@ -1,17 +1,81 @@
 # RCA Report
 
-## Incident Summary
-{{ summary }}
+## Executive Summary (plain English)
+{{ executive_summary }}
 
-## Timeline
+## Scope & Impact (users, transactions, duration, SLA)
+- **Users:** {{ scope_impact.users }}
+- **Transactions:** {{ scope_impact.transactions }}
+- **Duration:** {{ scope_impact.duration }}
+- **SLA:** {{ scope_impact.sla }}
+
+## Timeline of Events (changes, alerts, deploys, probes)
 {% for item in timeline %}
 - {{ item.timestamp }} | {{ item.source }} | {{ item.message }}
 {% endfor %}
 
-## Probable Root Cause
+## Technical Analysis (evidence set; healthy vs incident comparison; correlation)
+### Evidence set
+{% for item in technical_analysis.evidence_set %}
+- {{ item }}
+{% endfor %}
+
+### Healthy vs incident comparison
+{% for item in technical_analysis.healthy_vs_incident %}
+- {{ item }}
+{% endfor %}
+
+### Correlation
+{% for item in technical_analysis.correlation %}
+- {{ item }}
+{% endfor %}
+
+## Root Cause (concise statement)
 {{ root_cause }}
 
-## Recommended Actions
-{% for action in actions %}
+## Corrective Actions (done/planned with owners & ETAs)
+### Done
+{% for action in corrective_actions_done %}
 - {{ action }}
+{% endfor %}
+
+### Planned
+{% for action in corrective_actions_planned %}
+- {{ action }}
+{% endfor %}
+
+## Preventive Actions (owners, ETA, risks, CAB requirement)
+{% for action in preventive_actions %}
+- **Action:** {{ action.action }}
+  - **Owner:** {{ action.owner }}
+  - **ETA:** {{ action.eta }}
+  - **Risks:** {{ action.risks }}
+  - **CAB required:** {{ action.cab_required }}
+{% endfor %}
+
+## Validation Plan (KPIs to watch, success criteria)
+### KPIs to watch
+{% for kpi in validation_plan.kpis %}
+- {{ kpi }}
+{% endfor %}
+
+### Success criteria
+{% for criterion in validation_plan.success_criteria %}
+- {{ criterion }}
+{% endfor %}
+
+## Appendix (log excerpts, queries, diagrams)
+### Log excerpts
+{% for row in appendix.log_excerpts %}
+- {{ row.timestamp }} | {{ row.source }} | {{ row.message }}
+{% endfor %}
+
+### Queries
+{% for query in appendix.queries %}
+- {{ query }}
+{% endfor %}
+
+### Diagrams
+{% for item in appendix.diagrams %}
+- {{ item }}
 {% endfor %}
