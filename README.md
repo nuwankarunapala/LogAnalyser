@@ -50,6 +50,24 @@ python -m agent.main
 cat output/rca_report.md
 ```
 
+
+### Optional: assign friendly names to input logs
+If you want report entries to show labels like `kubectl describe` and `pod logs` instead of raw filenames,
+create `input_logs/log_metadata.yaml`:
+
+```yaml
+files:
+  my-describe.log:
+    display_name: kubectl describe
+    container_role: main
+  my-pod.log:
+    display_name: pod logs
+    container_role: main
+```
+
+- `display_name` controls the name shown in RCA timeline/report output.
+- `container_role` optionally overrides inferred role (`main`/`sidecar`).
+
 ### Windows PowerShell equivalents
 ```powershell
 python -m agent.main

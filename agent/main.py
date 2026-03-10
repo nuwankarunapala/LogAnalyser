@@ -96,7 +96,8 @@ def _build_context(
             _trim_message(
                 {
                     "timestamp": item.get("timestamp", "N/A"),
-                    "source": Path(item.get("source_file", "unknown")).name,
+                    "source": item.get("log_name")
+                    or Path(item.get("source_file", "unknown")).name,
                     "message": item.get("message", ""),
                 }
             )
