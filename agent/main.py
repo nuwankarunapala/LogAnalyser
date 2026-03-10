@@ -53,11 +53,87 @@ def _build_context(events: List[Dict[str, Any]], signals: List[Dict[str, Any]]) 
         for item in timeline_records[:100]
     ]
 
+    impacted_sources = sorted(
+        {
+            Path(item.get("source_file", "unknown")).name
+            for item in timeline_records
+            if item.get("source_file")
+        }
+    )
+
     return {
-        "summary": summary,
+        "executive_summary": summary,
+        "scope_impact": {
+            "users": "TBD - confirm impacted customer/user segments",
+            "transactions": f"{len(events)} log events reviewed, {len(signals)} signals matched",
+            "duration": (
+                f"{timeline_records[0].get('timestamp', 'N/A')} to "
+                f"{timeline_records[-1].get('timestamp', 'N/A')}"
+                if timeline_records
+                else "N/A"
+            ),
+            "sla": "TBD - map incident window against service SLA/SLO targets",
+        },
         "timeline": timeline,
+        "technical_analysis": {
+            "evidence_set": [
+                f"Parsed {len(events)} log event(s) from {len(impacted_sources)} source file(s)",
+                f"Detected {len(signals)} rule-based signal(s)",
+            ],
+            "healthy_vs_incident": [
+                "Healthy baseline not provided in current dataset",
+                "Incident behavior inferred from matched rule signatures and event clustering",
+            ],
+            "correlation": [
+                (
+                    f"Highest-ranked signal: {top_signal.get('rule_id')} "
+                    f"(severity={top_signal.get('severity')}, matches={top_signal.get('match_count', 0)})"
+                )
+                if top_signal
+                else "No direct rule correlation identified in this run"
+            ],
+        },
         "root_cause": root_cause,
-        "actions": actions,
+        "corrective_actions_done": [
+            "Automated triage completed against current rule catalog",
+            "Timeline assembled from available log evidence",
+        ],
+        "corrective_actions_planned": actions,
+        "preventive_actions": [
+            {
+                "action": "Expand rule catalog with incident-specific signatures",
+                "owner": "SRE/Platform Team",
+                "eta": "TBD",
+                "risks": "Low - may increase false positives until tuned",
+                "cab_required": "No",
+            },
+            {
+                "action": "Add proactive alerts for top recurring failure modes",
+                "owner": "Observability Team",
+                "eta": "TBD",
+                "risks": "Medium - alert noise if thresholds are not calibrated",
+                "cab_required": "Yes (if production alert policy changes)",
+            },
+        ],
+        "validation_plan": {
+            "kpis": [
+                "Error-rate trend for affected middleware components",
+                "Signal recurrence count for the identified root-cause rule",
+                "MTTD/MTTR for similar incidents",
+            ],
+            "success_criteria": [
+                "No recurrence of the same high-severity signal for 7 consecutive days",
+                "Service error-rate returns to normal operational baseline",
+            ],
+        },
+        "appendix": {
+            "log_excerpts": timeline[:10],
+            "queries": [
+                "Search for severity keywords and stack traces around incident window",
+                "Filter logs by impacted namespace/pod and correlate with deploy times",
+            ],
+            "diagrams": ["TBD - attach architecture/sequence diagram if required"],
+        },
     }
 
 
