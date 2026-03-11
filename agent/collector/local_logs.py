@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List
 import warnings
-import yaml
 
 
 ALLOWED_SUFFIXES = {".log", ".txt", ".jsonl"}
@@ -18,6 +17,15 @@ def _load_log_metadata(log_dir: Path) -> Dict[str, Dict[str, str]]:
     """Load optional per-file metadata (display name, role overrides)."""
     metadata_path = log_dir / LOG_METADATA_FILE
     if not metadata_path.exists():
+        return {}
+
+    try:
+        import yaml  # type: ignore
+    except ModuleNotFoundError:
+        warnings.warn(
+            f"Skipping {metadata_path}: PyYAML is not installed.",
+            stacklevel=1,
+        )
         return {}
 
     payload = yaml.safe_load(metadata_path.read_text(encoding="utf-8")) or {}

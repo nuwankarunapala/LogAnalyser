@@ -1,0 +1,16 @@
+{
+  "patterns": [
+    {"name": "ORA-12170", "category": "Database failure", "contains_any": ["ORA-12170"]},
+    {"name": "ORA-12541", "category": "Database failure", "contains_any": ["ORA-12541"]},
+    {"name": "DefaultConsumerBean", "category": "Integration Server failure", "contains_any": ["DefaultConsumerBean", "JMSException", "EJBException"]},
+    {"name": "Transaction rolled back", "category": "Projection/API failure", "contains_any": ["Transaction rolled back"]},
+    {"name": "HTTP 502/503", "category": "Ingress/gateway issue", "contains_any": ["HTTP 502", "HTTP 503", "upstream connect error"]},
+    {"name": "OOMKilled", "category": "Memory exhaustion", "contains_any": ["OOMKilled", "OutOfMemoryError"]},
+    {"name": "CrashLoopBackOff", "category": "Kubernetes pod crash", "contains_any": ["CrashLoopBackOff", "Back-off restarting failed container"]},
+    {"name": "ImagePullBackOff", "category": "Deployment failure", "contains_any": ["ImagePullBackOff", "ErrImagePull"]},
+    {"name": "FailedScheduling", "category": "Autoscaler/resource issue", "contains_any": ["FailedScheduling", "DiskPressure", "MemoryPressure"]},
+    {"name": "Probe failures", "category": "Kubernetes pod crash", "contains_any": ["liveness probe failed", "readiness probe failed"]},
+    {"name": "TLS handshake failed", "category": "Linkerd/service mesh issue", "contains_any": ["TLS handshake failed"]},
+    {"name": "timeout/connection refused", "category": "Network/Connectivity issue", "contains_any": ["timeout", "connection refused"]}
+  ]
+}
