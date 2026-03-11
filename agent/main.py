@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use-openai", action="store_true")
     parser.add_argument("--openai-model", default="gpt-4.1-mini")
     parser.add_argument("--output-dir", type=Path, default=Path("output"))
-    parser.add_argument("--pattern-file", type=Path, default=Path("agent/detect/ifs_k8s_patterns.json"))
+    parser.add_argument("--pattern-file", type=Path, default=Path("agent/detect/ifs_k8s_patterns.yaml"))
     parser.add_argument("--debug", action="store_true")
     return parser.parse_args()
 

@@ -26,7 +26,7 @@ The previous scaffold had several reliability gaps:
 - `log_analyser.py`: required CLI entry point.
 - `agent/file_discovery.py`: recursively discovers and categorizes files from expected dump structure.
 - `agent/parsers.py`: streaming parser, timestamp extraction, severity detection, pattern matching, outage window filtering.
-- `agent/detect/ifs_k8s_patterns.json`: IFS/Kubernetes-focused local knowledge base.
+- `agent/detect/ifs_k8s_patterns.yaml`: IFS/Kubernetes-focused local knowledge base.
 - `agent/root_cause_engine.py`: category scoring with confidence and evidence selection.
 - `agent/timeline_builder.py`: event timeline + top error summaries.
 - `agent/openai_assistant.py`: optional OpenAI refinement using condensed evidence only.
@@ -87,15 +87,6 @@ Most likely root cause: Database failure based on correlated event frequency/sev
 ## Additional information required
 - Was there a deployment during the outage window?
 - Was database slowness or listener outage reported?
-```
-
-## Dependency note
-
-Core execution now works without `PyYAML` because the default pattern library is JSON.
-If you explicitly use a YAML pattern file, install dependencies first:
-
-```bash
-pip install -r requirements.txt
 ```
 
 ## Run tests
