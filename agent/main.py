@@ -1,257 +1,169 @@
-"""CLI entry point for the IFS middleware log analysis RCA agent."""
-
 from __future__ import annotations
 
 import argparse
-import sys
+import logging
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-import yaml
+from agent.file_discovery import discover_dump_files, flatten_discovered
+from agent.openai_assistant import refine_with_openai
+from agent.parsers import filter_window, parse_discovered_file
+from agent.pattern_library import load_pattern_library
+from agent.rca_writer import write_outputs
+from agent.root_cause_engine import score_root_causes
+from agent.timeline_builder import build_timeline, summarize_top_errors
 
-if __package__ in {None, ""}:
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from agent.collector.local_logs import read_log_events
-from agent.correlate.chatgpt_rca import infer_root_cause_with_chatgpt
-from agent.correlate.root_cause_ranker import rank_root_causes
-from agent.correlate.timeline import build_timeline
-from agent.detect.rule_engine import apply_rules
-from agent.report.render import render_markdown
-
-
-MAX_REPORT_LOG_MESSAGE_LENGTH = 280
-
-
-def _load_rules(rules_file: Path) -> List[Dict[str, Any]]:
-    payload = yaml.safe_load(rules_file.read_text(encoding="utf-8")) or {}
-    rules = payload.get("rules", [])
-    if not isinstance(rules, list):
-        raise ValueError(f"Invalid rules format in {rules_file}")
-    return rules
-
-
-def _build_context(
-    events: List[Dict[str, Any]],
-    signals: List[Dict[str, Any]],
-    ai_hint: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    ranked = rank_root_causes(signals)
-    top_signal = ranked[0] if ranked else None
-
-    unresolved_rca = False
-
-    if top_signal:
-        root_cause = top_signal.get("rca_hint", "Unknown")
-        actions = top_signal.get("recommended_actions", [])
-        summary = (
-            f"Detected {len(signals)} signal(s) across {len(events)} log event(s). "
-            f"Top candidate: {top_signal.get('rule_id')} ({top_signal.get('severity')})."
-        )
-    else:
-        unresolved_rca = True
-        root_cause = "No known issue detected from current rule catalog"
-        actions = [
-            "Review raw logs and extend rules.yaml for your incident signatures.",
-            "Collect additional Kubernetes context and rerun analysis.",
-        ]
-        summary = f"No rules matched. Parsed {len(events)} log event(s)."
-
-    if ai_hint:
-        if ai_hint.get("root_cause"):
-            root_cause = ai_hint["root_cause"]
-            unresolved_rca = False
-        if ai_hint.get("executive_summary"):
-            summary = ai_hint["executive_summary"]
-        ai_actions = ai_hint.get("corrective_actions_planned", [])
-        if ai_actions:
-            actions = ai_actions
-
-    if unresolved_rca:
-        summary = (
-            f"{summary} Root cause is still inconclusive with the current evidence. "
-            "Please provide additional incident context and Kubernetes diagnostics."
-        )
-        actions.extend(
-            [
-                "Share recent deployment/configuration changes and exact user-facing symptoms.",
-                "Run `kubectl get pods -A -o wide` and `kubectl describe pod <pod> -n <namespace>` for impacted workloads.",
-                "Run `kubectl get events -A --sort-by=.metadata.creationTimestamp | tail -n 200` to capture recent cluster events.",
-                "Run `kubectl logs <pod> -n <namespace> --previous --tail=200` for restarting containers.",
-            ]
-        )
-
-    def _trim_message(record: Dict[str, Any]) -> Dict[str, Any]:
-        msg = str(record.get("message", ""))
-        if len(msg) > MAX_REPORT_LOG_MESSAGE_LENGTH:
-            msg = f"{msg[:MAX_REPORT_LOG_MESSAGE_LENGTH]}... [truncated]"
-        updated = dict(record)
-        updated["message"] = msg
-        return updated
-
-    timeline_records = build_timeline(events)
-    timeline = []
-    for item in timeline_records[:100]:
-        timeline.append(
-            _trim_message(
-                {
-                    "timestamp": item.get("timestamp", "N/A"),
-                    "source": item.get("log_name")
-                    or Path(item.get("source_file", "unknown")).name,
-                    "message": item.get("message", ""),
-                }
-            )
-        )
-
-    impacted_sources = sorted(
-        {
-            Path(item.get("source_file", "unknown")).name
-            for item in timeline_records
-            if item.get("source_file")
-        }
-    )
-
-    return {
-        "executive_summary": summary,
-        "scope_impact": {
-            "users": "TBD - confirm impacted customer/user segments",
-            "transactions": f"{len(events)} log events reviewed, {len(signals)} signals matched",
-            "duration": (
-                f"{timeline_records[0].get('timestamp', 'N/A')} to "
-                f"{timeline_records[-1].get('timestamp', 'N/A')}"
-                if timeline_records
-                else "N/A"
-            ),
-            "sla": "TBD - map incident window against service SLA/SLO targets",
-        },
-        "timeline": timeline,
-        "technical_analysis": {
-            "evidence_set": [
-                f"Parsed {len(events)} log event(s) from {len(impacted_sources)} source file(s)",
-                f"Detected {len(signals)} rule-based signal(s)",
-            ],
-            "healthy_vs_incident": [
-                "Healthy baseline not provided in current dataset",
-                "Incident behavior inferred from matched rule signatures and event clustering",
-            ],
-            "correlation": [
-                (
-                    f"Highest-ranked signal: {top_signal.get('rule_id')} "
-                    f"(severity={top_signal.get('severity')}, matches={top_signal.get('match_count', 0)})"
-                )
-                if top_signal
-                else "No direct rule correlation identified in this run"
-            ],
-        },
-        "root_cause": root_cause,
-        "corrective_actions_done": [
-            "Automated triage completed against current rule catalog",
-            "Timeline assembled from available log evidence",
-        ],
-        "corrective_actions_planned": actions,
-        "preventive_actions": [
-            {
-                "action": "Expand rule catalog with incident-specific signatures",
-                "owner": "SRE/Platform Team",
-                "eta": "TBD",
-                "risks": "Low - may increase false positives until tuned",
-                "cab_required": "No",
-            },
-            {
-                "action": "Add proactive alerts for top recurring failure modes",
-                "owner": "Observability Team",
-                "eta": "TBD",
-                "risks": "Medium - alert noise if thresholds are not calibrated",
-                "cab_required": "Yes (if production alert policy changes)",
-            },
-        ],
-        "validation_plan": {
-            "kpis": [
-                "Error-rate trend for affected middleware components",
-                "Signal recurrence count for the identified root-cause rule",
-                "MTTD/MTTR for similar incidents",
-            ],
-            "success_criteria": [
-                "No recurrence of the same high-severity signal for 7 consecutive days",
-                "Service error-rate returns to normal operational baseline",
-            ],
-        },
-        "appendix": {
-            "log_excerpts": timeline[:10],
-            "queries": [
-                "Search for severity keywords and stack traces around incident window",
-                "Filter logs by impacted namespace/pod and correlate with deploy times",
-            ],
-            "diagrams": ["TBD - attach architecture/sequence diagram if required"],
-        },
-    }
+logger = logging.getLogger("log_analyser")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run RCA analysis over local exported logs.")
-    parser.add_argument(
-        "--log-dir",
-        type=Path,
-        default=Path("input_logs"),
-        help="Directory containing exported middleware logs (.log/.txt/.jsonl).",
-    )
-    parser.add_argument(
-        "--rules-file",
-        type=Path,
-        default=Path("agent/detect/rules.yaml"),
-        help="YAML rule catalog file.",
-    )
-    parser.add_argument(
-        "--template-file",
-        type=Path,
-        default=Path("agent/report/rca_template.md.j2"),
-        help="Jinja2 markdown template path.",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=Path("output"),
-        help="Directory where generated report is written.",
-    )
-    parser.add_argument(
-        "--use-chatgpt",
-        action="store_true",
-        help="Enable optional ChatGPT-assisted RCA enrichment (requires OPENAI_API_KEY).",
-    )
-    parser.add_argument(
-        "--chatgpt-model",
-        default="gpt-4.1-mini",
-        help="Model used for ChatGPT-assisted RCA when --use-chatgpt is enabled.",
-    )
+    parser = argparse.ArgumentParser(description="IFS Kubernetes dump RCA analyser")
+    parser.add_argument("--dump-folder", type=Path, required=True)
+    parser.add_argument("--outage-start", required=True, help="YYYY-MM-DD HH:MM:SS")
+    parser.add_argument("--window-minutes", type=int, default=15)
+    parser.add_argument("--use-openai", action="store_true")
+    parser.add_argument("--openai-model", default="gpt-4.1-mini")
+    parser.add_argument("--output-dir", type=Path, default=Path("output"))
+    parser.add_argument("--pattern-file", type=Path, default=Path("agent/detect/ifs_k8s_patterns.yaml"))
+    parser.add_argument("--debug", action="store_true")
     return parser.parse_args()
+
+
+def _parse_outage_start(value: str) -> datetime:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+    except ValueError as exc:
+        raise SystemExit(f"Invalid --outage-start format: {value}. Use YYYY-MM-DD HH:MM:SS") from exc
+
+
+def _build_additional_questions(primary_confidence: int) -> List[str]:
+    if primary_confidence >= 60:
+        return []
+    return [
+        "Was there a deployment during the outage window?",
+        "Was database slowness or listener outage reported?",
+        "Were users seeing HTTP 502, login failures, or full outage?",
+        "Were any pods manually restarted during incident response?",
+        "Can you provide DB alert logs and kubectl get events output?",
+    ]
+
+
+def run_analysis(args: argparse.Namespace) -> Dict[str, Any]:
+    outage_start = _parse_outage_start(args.outage_start)
+    patterns = load_pattern_library(args.pattern_file)
+
+    discovered = discover_dump_files(args.dump_folder)
+    files = list(flatten_discovered(discovered))
+    logger.info("Discovered %s files across %s categories", len(files), len(discovered))
+
+    events = []
+    for entry in files:
+        logger.debug("Parsing %s [%s]", entry.path, entry.source_type)
+        events.extend(parse_discovered_file(entry, patterns))
+
+    logger.info("Parsed %s total log lines/events", len(events))
+    focused_events = filter_window(events, outage_start, args.window_minutes)
+    logger.info("Focused event set size: %s", len(focused_events))
+
+    ranked_causes = score_root_causes(focused_events)
+    primary = ranked_causes[0] if ranked_causes else {"category": "Unknown", "confidence": 0, "score": 0, "count": 0, "evidence": []}
+
+    timeline_events = build_timeline(focused_events)
+    top_errors = summarize_top_errors(focused_events)
+    evidence_snippets = primary.get("evidence", [])
+
+    affected_components = sorted({e.component for e in focused_events})
+    observed_errors = [entry["signal"] for entry in top_errors[:5]]
+
+    report: Dict[str, Any] = {
+        "executive_summary": (
+            f"Outage analysis around {outage_start} indicates primary failure category '{primary['category']}' "
+            f"with confidence {primary.get('confidence', 0)}%."
+        ),
+        "scope_impact": {
+            "affected_users_services": "Unknown from dump alone; validate with incident channel/business report.",
+            "affected_components": affected_components,
+            "observed_errors": observed_errors,
+            "outage_duration": "Unknown (inferred window only)",
+            "sla_impact": "Unknown",
+        },
+        "timeline": [
+            {
+                "timestamp": e.timestamp.isoformat() if e.timestamp else "N/A",
+                "source_type": e.source_type,
+                "component": e.component,
+                "message": e.message,
+            }
+            for e in timeline_events[:150]
+        ],
+        "primary_root_cause": primary,
+        "secondary_contributors": ranked_causes[1:4],
+        "root_cause_statement": f"Most likely root cause: {primary['category']} based on correlated event frequency/severity across components.",
+        "corrective_actions": [
+            "Validate impacted component health and restart stability.",
+            "Confirm infrastructure dependencies (DB/network/ingress) are healthy.",
+            "Review changes/deployments overlapping outage window.",
+        ],
+        "preventive_actions": [
+            "Add targeted alerts for repeated signatures (ORA, 502/503, probe failures, CrashLoopBackOff).",
+            "Increase runbook coverage for IFS outage triage and required artifacts.",
+        ],
+        "validation_plan": {
+            "kpis": ["5xx rate", "pod restarts", "DB timeout rate", "probe failure count"],
+            "success_criteria": ["No repeat critical patterns for 24h", "error rates return to baseline"],
+        },
+        "evidence_snippets": evidence_snippets,
+        "file_references": [str(f.path) for f in files[:50]],
+        "queries_used": [pattern["name"] for pattern in patterns],
+        "additional_information_required": _build_additional_questions(primary.get("confidence", 0)),
+        "recommended_additional_artifacts": [
+            "kubectl get events -A --sort-by=.metadata.creationTimestamp",
+            "database alert logs",
+            "affected pod logs for wider range",
+            "ingress controller events",
+            "deployment change details",
+        ],
+        "analysis_stats": {
+            "total_files": len(files),
+            "total_events": len(events),
+            "window_events": len(focused_events),
+            "categories_detected": len(ranked_causes),
+        },
+    }
+
+    if args.use_openai:
+        condensed = {
+            "outage_time": args.outage_start,
+            "suspected_components": affected_components,
+            "timeline": report["timeline"][:30],
+            "top_errors": top_errors,
+            "evidence_snippets": evidence_snippets,
+            "local_hypothesis": primary,
+            "missing_information": report["additional_information_required"],
+        }
+        ai_hint = refine_with_openai(condensed, model=args.openai_model)
+        if ai_hint:
+            report["openai_assist"] = ai_hint
+            if ai_hint.get("likely_root_cause"):
+                report["root_cause_statement"] = f"Most likely root cause: {ai_hint['likely_root_cause']}"
+
+    return report
 
 
 def main() -> None:
     args = parse_args()
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+    )
 
-    if not args.log_dir.exists():
-        raise SystemExit(f"Log directory not found: {args.log_dir}")
+    if not args.dump_folder.exists():
+        raise SystemExit(f"Dump folder not found: {args.dump_folder}")
 
-    events = read_log_events(args.log_dir)
-    rules = _load_rules(args.rules_file)
-    signals = apply_rules(events, rules)
-
-    ai_hint = None
-    if args.use_chatgpt:
-        ai_hint = infer_root_cause_with_chatgpt(events, signals, model=args.chatgpt_model)
-
-    context = _build_context(events, signals, ai_hint=ai_hint)
-    report = render_markdown(context, args.template_file)
-
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = args.output_dir / "rca_report.md"
-    report_path.write_text(report, encoding="utf-8")
-
-    print(f"Parsed events : {len(events)}")
-    print(f"Matched signals: {len(signals)}")
-    if args.use_chatgpt:
-        print(f"ChatGPT hint  : {'used' if ai_hint else 'not available'}")
-    print(f"Report written : {report_path.resolve()}")
+    report = run_analysis(args)
+    write_outputs(report, args.output_dir)
+    logger.info("RCA outputs written to %s", args.output_dir.resolve())
 
 
 if __name__ == "__main__":
