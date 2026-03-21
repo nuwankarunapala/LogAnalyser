@@ -7,6 +7,7 @@ import importlib.util
 import warnings
 from pathlib import Path
 from typing import Any, Dict, List
+import warnings
 
 
 ALLOWED_SUFFIXES = {".log", ".txt", ".jsonl"}
@@ -21,14 +22,15 @@ def _load_log_metadata(log_dir: Path) -> Dict[str, Dict[str, str]]:
     if not metadata_path.exists():
         return {}
 
-    if importlib.util.find_spec("yaml") is None:
+    try:
+        import yaml  # type: ignore
+    except ModuleNotFoundError:
         warnings.warn(
             f"Skipping {metadata_path}: PyYAML is not installed.",
             stacklevel=1,
         )
         return {}
 
-    yaml = importlib.import_module("yaml")
     payload = yaml.safe_load(metadata_path.read_text(encoding="utf-8")) or {}
     files = payload.get("files", {})
     if not isinstance(files, dict):
