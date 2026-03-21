@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import importlib
+import importlib.util
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List
 import warnings
@@ -63,11 +66,9 @@ def _looks_like_text_file(file_path: Path) -> bool:
     if not sample:
         return True
 
-    # gzip magic bytes => almost certainly compressed binary content.
     if sample.startswith(b"\x1f\x8b"):
         return False
 
-    # Embedded NULL bytes strongly indicate binary formats.
     if b"\x00" in sample:
         return False
 
