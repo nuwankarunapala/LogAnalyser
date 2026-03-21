@@ -1,99 +1,114 @@
-# IFS Middleware Log RCA Agent (Scaffold)
+# Log Analyser - IFS Kubernetes Outage RCA Agent
 
-This repository contains the initial file structure for **Option A** Python-based RCA agent.
+This project analyzes an exported IFS Kubernetes dump and produces a professional RCA package:
 
-## Structure
-- `agent/collector`: Kubernetes logs/events/object collectors
-- `agent/detect`: Rule engine + YAML rule catalog
-- `agent/correlate`: Timeline and root-cause ranking logic
-- `agent/report`: Markdown/Jinja report rendering
-- `agent/main.py`: CLI entry point scaffold
+- `incident_rca.md`
+- `incident_rca.json`
+- `timeline.txt`
 
-## Quick check
+It is designed to be reliable on incomplete dumps, stream log files line-by-line, and optionally use OpenAI **only after** local evidence extraction.
+
+## What was broken before
+
+The previous scaffold had several reliability gaps:
+
+1. CLI did not match required interface (`--log-dir` instead of `--dump-folder`/`--outage-start`).
+2. No robust dump structure discovery for `pods/logs`, `pods/descriptions`, ingress, autoscaler, deployments, jobs.
+3. Timeline sorter expected timestamps that were never parsed from lines.
+4. Rule catalog was too small and not IFS/Kubernetes focused.
+5. No windowed outage analysis around incident time.
+6. Weak root-cause scoring/correlation across components.
+7. Report output format did not match required RCA structure and file names.
+8. OpenAI prompt could include raw event payloads without strong condensation discipline.
+
+- Legacy collector metadata parsing (`agent/collector/local_logs.py`) now checks for PyYAML without importing it at module load and skips metadata instead of crashing when PyYAML is absent.
+
+## Refactored design
+
+- `log_analyser.py`: required CLI entry point.
+- `agent/file_discovery.py`: recursively discovers and categorizes files from expected dump structure.
+- `agent/parsers.py`: streaming parser, timestamp extraction, severity detection, pattern matching, outage window filtering.
+- `agent/detect/ifs_k8s_patterns.json`: IFS/Kubernetes-focused local knowledge base.
+- `agent/root_cause_engine.py`: category scoring with confidence and evidence selection.
+- `agent/timeline_builder.py`: event timeline + top error summaries.
+- `agent/openai_assistant.py`: optional OpenAI refinement using condensed evidence only.
+- `agent/rca_writer.py`: writes `incident_rca.md`, `incident_rca.json`, `timeline.txt`.
+- `tests/`: basic tests for discovery, timestamp/pattern parsing, root-cause scoring.
+
+## CLI usage
+
 ```bash
-python -m compileall agent
-python -m agent.main
+python log_analyser.py \
+  --dump-folder ./dump-folder \
+  --outage-start "2026-03-01 10:15:00" \
+  --window-minutes 15 \
+  --output-dir ./output
 ```
 
-## Run full local analysis
-1. Copy exported logs into `input_logs/` (`.log`, `.txt`, `.jsonl`).
-2. Run:
+Optional OpenAI refinement:
 
 ```bash
-python agent/main.py --log-dir input_logs --output-dir output
+export OPENAI_API_KEY="<your_key>"
+python log_analyser.py \
+  --dump-folder ./dump-folder \
+  --outage-start "2026-03-01 10:15:00" \
+  --use-openai \
+  --openai-model gpt-4.1-mini
 ```
 
-3. Open generated report:
+## Arguments
 
-```bash
-cat output/rca_report.md
+- `--dump-folder` (required)
+- `--outage-start` (required, format `YYYY-MM-DD HH:MM:SS`)
+- `--window-minutes` (default `15`)
+- `--use-openai` (flag)
+- `--openai-model` (default `gpt-4.1-mini`)
+- `--output-dir` (default `output`)
+- `--debug` (optional verbose logs)
+
+## OpenAI usage safety
+
+The agent does local analysis first and only sends condensed structured evidence:
+
+- outage time
+- suspected components
+- timeline slice
+- top errors
+- selected evidence snippets
+- local hypothesis and confidence
+- missing information questions
+
+Raw full log streams are **not** sent.
+
+## Example RCA markdown snippet
+
+```markdown
+## 5. Root Cause
+Most likely root cause: Database failure based on correlated event frequency/severity across components.
+
+## Additional information required
+- Was there a deployment during the outage window?
+- Was database slowness or listener outage reported?
 ```
 
-## Run full local analysis
-1. Install dependencies once:
+## Dependency note
+
+Core execution now works without `PyYAML` because the default pattern library is JSON.
+If the configured pattern file is missing, the tool falls back to a built-in IFS/K8s pattern set so startup still succeeds.
+If you explicitly use a YAML pattern file, install dependencies first:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Copy exported logs into `input_logs/` (`.log`, `.txt`, `.jsonl`).
-
-3. Run the agent:
+## Run tests
 
 ```bash
-python -m agent.main
+pytest -q
 ```
 
-4. Open generated report:
+## Notes / assumptions
 
-```bash
-cat output/rca_report.md
-```
-
-
-### Optional: assign friendly names to input logs
-If you want report entries to show labels like `kubectl describe` and `pod logs` instead of raw filenames,
-create `input_logs/log_metadata.yaml`:
-
-```yaml
-files:
-  my-describe.log:
-    display_name: kubectl describe
-    container_role: main
-  my-pod.log:
-    display_name: pod logs
-    container_role: main
-```
-
-- `display_name` controls the name shown in RCA timeline/report output.
-- `container_role` optionally overrides inferred role (`main`/`sidecar`).
-
-### Windows PowerShell equivalents
-```powershell
-python -m agent.main
-Get-Content .\output\rca_report.md
-```
-
-### Troubleshooting
-- If no report appears, first check the command output for the `Report written :` absolute path and open that exact file.
-- If the command fails with `ModuleNotFoundError`/`ImportError`, run `pip install -r requirements.txt` and re-run.
-
-- If report timeline is gibberish (`ï¿½` characters), your `.log` may be compressed/binary; export plain text logs or decompress first.
-
-## Optional: ChatGPT-assisted root cause
-You can optionally ask the agent to use ChatGPT to refine the root-cause statement and planned corrective actions.
-
-1. Export your API key:
-
-```bash
-export OPENAI_API_KEY="<your_api_key>"
-```
-
-2. Run with ChatGPT enabled:
-
-```bash
-python -m agent.main --use-chatgpt --chatgpt-model gpt-4.1-mini
-```
-
-If ChatGPT is unavailable (missing key/network/API error), the agent automatically falls back to the built-in rule-based RCA output.
-
+- Missing folders are handled gracefully; only existing files are parsed.
+- Outage duration/SLA impact are marked unknown unless inferable from data.
+- For very large dumps, parser reads line-by-line to reduce memory pressure, though normalized event objects are still retained for correlation.
